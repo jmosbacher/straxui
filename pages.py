@@ -4,10 +4,10 @@ from random import randint
 from concurrent.futures import ThreadPoolExecutor
 from bokeh.io import curdoc
 from bokeh.layouts import row, column, widgetbox
-from bokeh.models import ColumnDataSource
+from bokeh.models import ColumnDataSource, CustomJS
 from bokeh.models.widgets import PreText, Select, Button, TextInput, DataTable, DateFormatter, TableColumn, Tabs, Panel, NumberEditor
 from bokeh.plotting import figure
-from bokeh.palettes import Spectral5
+from bokeh.palettes import Spectral5, Plasma256
 from bokeh.document import without_document_lock
 from tornado import gen
 from straxrpc import StraxClient
@@ -178,8 +178,9 @@ class PlotColumnsPage(Page):
        #(Title, name, catagories)
         ("X Axis", "x", None),
         ("Y Axis", "y", None),
-        ("Color", "color", Spectral5),
-        ("Size", "size", list(range(6, 22, 3))),
+        ("Size", "size", list(np.arange(1, 10, 0.5))),
+        ("Color", "color", Plasma256),
+        ("Opacity", "alpha", list(np.arange(0, 1, 0.05)) ),
     ]
     title = "Plot Columns"
     sources = {}
@@ -224,12 +225,12 @@ class PlotColumnsPage(Page):
         return column(data_loading, plot_options, widgetbox(self.plot_button))
 
     def build_plot(self):
-        fig = figure(**self.plot_options, name="column_plot")
+        fig = figure(**self.plot_options, name="column_plot", output_backend="webgl")
         sources = self.shared_state["sources"]
         data = sources.get(self.src_selector.value, sources["__random__"]).data
         source = ColumnDataSource(data)
         df = pd.DataFrame(source.data)
-        options = dict(x="x", y="y")
+        options = dict(x="x", y="y", size=1, color="blue", alpha=0.5)
         for (title, name, cats), selector in zip(self.selection_options, self.column_selectors):
             if selector.value in df.columns:
                 if cats is None:
@@ -258,7 +259,7 @@ class PlotColumnsPage(Page):
         # self.df_selector.value = self.shared_state["dataframe_names"][0]
 
 class StraxServerPage(Page):
-    title = "Backend Settings"
+    title = "Strax Settings"
 
     def init(self):
         self.address_selector = TextInput(value="localhost:50051", title="Strax server:", width=200, height=60)
@@ -293,16 +294,40 @@ class StraxServerPage(Page):
 
 from json_editor import JsonEditor
 
+# class PlotTemplatesPage(Page):
+#     title = 'Plot Templates'
+
+#     def init(self):
+#         self.plot_templates = self.shared_state["plot_templates"]
+#         # self.json_viewer = TextInput(value=self.text, title="Templates", width=1000, height=600)
+#         self.json_viewer = JsonEditor(json=self.plot_templates, title="Templates", width=1000, height=600)
+#         self.json_viewer.disabled = True
+
+#     def create_page(self):
+#         return column(widgetbox(self.json_viewer, width=self.width), width=self.width)
+
 class PlotTemplatesPage(Page):
     title = 'Plot Templates'
 
     def init(self):
         self.plot_templates = self.shared_state["plot_templates"]
         # self.json_viewer = TextInput(value=self.text, title="Templates", width=1000, height=600)
-        self.json_viewer = JsonEditor(json=self.plot_templates, title="Templates", width=1000, height=600)
-        self.json_viewer.disabled = True
+        self.template_selector = Select(title=None, value="", options=[t["name"] for t in self.plot_templates],height=60, width=200)
+        self.build_plot_button = Button(label="Build plot", button_type="primary", disabled=True,height=60, width=180)
+        self.json_viewer = PreText(text="Template values: \n", width=700, height=500)
+        # self.json_viewer.js_on_change("value", cb)
+        self.json_viewer.disabled = False
 
     def create_page(self):
-        return column(widgetbox(self.json_viewer, width=self.width), width=self.width)
+        def template_changed(attr, old, new):
+            text = "Template values: \n"
+            for t in self.plot_templates:
+                if t["name"] == new:
+                    text += json.dumps(t, sort_keys=True, indent=4)
+            self.json_viewer.text = text
+        self.template_selector.on_change("value", template_changed)
+        self.template_selector.value=self.plot_templates[0]["name"]
+        selection = row(widgetbox(self.template_selector), widgetbox(self.build_plot_button))
+        return column(selection ,widgetbox(self.json_viewer, width=self.width), width=self.width)
 
 page_classes = [ExplorePage, LoadDataPage, PlotColumnsPage, StraxServerPage, PlotTemplatesPage]

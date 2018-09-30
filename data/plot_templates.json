@@ -1,5 +1,6 @@
 [
     {
+        "name": "Demo plot 1",
         "figure":{
             "plot_width": 500,
             "plot_height": 400, 
@@ -7,7 +8,35 @@
             "y_axis_label": "y",
             "x_range": null,
             "y_range": null,
-            "title": ""
+            "title": "This is not the best plot ever made"
+        
+
+        },
+        "glyphs": [
+            {
+                "kind": "circle",
+                "x": "x",
+                "y": "y",
+                "source": "__random__",
+                "kwargs": {
+                    "color": "blue",
+                    "alpha": 0.5
+                }
+                
+                
+            }
+        ]
+    },
+    {
+        "name": "Demo plot 2",
+        "figure":{
+            "plot_width": 300,
+            "plot_height": 500, 
+            "x_axis_label": "x",
+            "y_axis_label": "y",
+            "x_range": null,
+            "y_range": null,
+            "title": "This is a tribute."
         
 
         },
@@ -26,5 +55,4 @@
             }
         ]
     }
-
 ]
