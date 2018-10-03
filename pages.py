@@ -10,10 +10,12 @@ from bokeh.plotting import figure
 from bokeh.palettes import Spectral5, Plasma256
 from bokeh.document import without_document_lock
 from tornado import gen
-from straxrpc import StraxClient
+# from straxrpc.client import StraxClient
 from functools import partial
+from copy import copy
 import json
 import numpy as np
+import time
 
 class Page:
     """
@@ -84,7 +86,7 @@ class ExplorePage(Page):
             self.df_title.text = 'Columns for {}:'.format(new)
             ctx = self.shared_state.get("strax_ctx")
             df = ctx.data_info(new)
-            self.df_source.data = df.to_dict(orient='list')
+            self.df_source.data = df.astype("str").to_dict(orient='list')
 
         self.dataframe_selector.on_change('value', dataframe_changed)
         self.dataframe_selector.value = self.dataframe_selector.options[0]
@@ -123,19 +125,45 @@ class LoadDataPage(Page):
         def disable_button():
             self.load_df_button.label = "Working..."
             self.load_df_button.disabled = True
-        
-        def switch_table_source(name):
-            source = self.shared_state['sources'][name]
-            self.df_source.data = source.data
-            self.df_table.columns = [TableColumn(field=n, title=n) for n in source.data]
+
+        def enable_button():
             self.load_df_button.disabled = False
             self.load_df_button.label = "Load"
 
-        def create_source(df, name):
-            data = df.to_dict(orient='list')
+        def switch_table_source(name):
+            try:
+                source = self.shared_state['sources'][name]
+                self.df_source.data = copy(source.data)
+                self.df_table.columns = [TableColumn(field=n, title=n) for n in source.data]
+            except:
+                print("failed to get data")
+            finally:
+                enable_button()
+
+        def save_source(name):
+            #data = {k: [] for k in keys} #df.to_dict(orient='list')
             # name = "{}_{}".format(self.dataframe_selector.value, self.run_id_selector.value)
-            self.shared_state['sources'][name] = ColumnDataSource(data)
+            self.shared_state['sources'][name] = ColumnDataSource(self.df_source.data)
+
+        def reset_source(keys):
+            data = {k: [] for k in keys}
+            self.df_table.columns = [TableColumn(field=n, title=n) for n in keys]
+            self.df_source.data = data
+
+        def stream_df(doc, ctx, run_id, dfname):
+            for i, df in enumerate(ctx.get_df_iter(run_id, dfname)):
+                df = df.dropna(how="any")
+                # df = df.fillna(-999)
+                if i==0:
+                    doc.add_next_tick_callback(partial(reset_source, list(df.columns)))
+                doc.add_next_tick_callback(partial(self.df_source.stream, df.to_dict(orient="list")))
+                if not (i+1)%10:
+                    time.sleep(0.1)
+            name = "{}_{}".format(dfname, run_id)
+            doc.add_next_tick_callback(enable_button)
+            doc.add_next_tick_callback(partial(save_source, name))
             
+
         @gen.coroutine
         @without_document_lock
         def load_dataframe_pressed():
@@ -145,10 +173,11 @@ class LoadDataPage(Page):
             dfname = self.dataframe_selector.value
             run_id = self.run_id_selector.value
             name = "{}_{}".format(dfname, run_id)
-            if name not in self.shared_state['sources']:
-                df = yield executor.submit(ctx.get_df, run_id, dfname)
-                doc.add_next_tick_callback(partial(create_source, df, name))
-            doc.add_next_tick_callback(partial(switch_table_source, name))
+            if name in self.shared_state['sources']:
+                doc.add_next_tick_callback(partial(switch_table_source, name))
+            else:
+                yield executor.submit(stream_df, doc, ctx, run_id, dfname)
+    
         self.load_df_button.on_click(load_dataframe_pressed)
         self.load_df_button.on_click(disable_button)
 
@@ -286,25 +315,11 @@ class StraxServerPage(Page):
             self.strax_config_table.columns = [TableColumn(field=name, title=name) for name in data]
             self.strax_config_source.data = data
         self.strax_config_dataframe.on_change('value', dataframe_changed)
-
+        self.strax_config_dataframe.value = self.strax_config_dataframe.options[0]
         return column(widgetbox(self.address_selector), widgetbox(self.strax_config_dataframe), widgetbox(self.strax_config_table), width=self.width)
 
     def update(self):
         pass
-
-from json_editor import JsonEditor
-
-# class PlotTemplatesPage(Page):
-#     title = 'Plot Templates'
-
-#     def init(self):
-#         self.plot_templates = self.shared_state["plot_templates"]
-#         # self.json_viewer = TextInput(value=self.text, title="Templates", width=1000, height=600)
-#         self.json_viewer = JsonEditor(json=self.plot_templates, title="Templates", width=1000, height=600)
-#         self.json_viewer.disabled = True
-
-#     def create_page(self):
-#         return column(widgetbox(self.json_viewer, width=self.width), width=self.width)
 
 class PlotTemplatesPage(Page):
     title = 'Plot Templates'

@@ -11,7 +11,7 @@ from bokeh.models.widgets import PreText, Select, Button, TextInput, DataTable, 
 from bokeh.plotting import figure
 from bokeh.document import without_document_lock
 from tornado import gen
-from straxrpc import StraxClient
+from straxrpc.client import StraxClient
 from functools import partial
 from pages import page_classes
 import json
