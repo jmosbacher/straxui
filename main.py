@@ -16,6 +16,7 @@ from functools import partial
 from pages import page_classes
 import json
 import numpy as np
+from collections import defaultdict
 
 strax = StraxClient('localhost:50051')
 try:
@@ -27,16 +28,20 @@ doc = curdoc()
 executor = ThreadPoolExecutor(max_workers=2)
 
 with open(join(dirname(__file__), "data","plot_templates.json"), "rb") as f:
-    plot_templates = json.load(f)
-random_src = ColumnDataSource({"x":90*np.random.rand(100), "y": np.random.rand(100), 
-        "time":  10.*np.random.rand(100), "length":800.*np.random.rand(100)})
+    plot_templates = {t["name"]:t for t in json.load(f)}
+random_src = {"x":90*np.random.rand(100), "y": np.random.rand(100), 
+        "time":  10.*np.random.rand(100), "length":800.*np.random.rand(100),
+        "xs":[90*np.random.rand((10)) for _ in range(100)], "ys": [np.random.rand(10) for _ in range(100)]}
+sources = defaultdict(list)
+sources["__random__"].append(random_src)
+
 shared_state = {
     "executor": executor, 
     "doc": doc,
     "dataframe_names": dataframe_names,
     "strax_ctx": strax,
     "plot_templates": plot_templates,
-    "sources": {"__random__":random_src },
+    "sources": sources,
 }
 
 
