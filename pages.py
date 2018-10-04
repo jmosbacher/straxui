@@ -173,21 +173,21 @@ class LoadDataPage(Page):
             self.current_position.value = 0
             
 
-        def stream_df(doc, ctx, run_id, dfname):
-            try:
-                name = "{}_{}".format(dfname, run_id)
-                for i, df in enumerate(ctx.get_df_iter(run_id, dfname)):
-                    df = df.dropna(how="any")
-                    # df = df.fillna(-999)
-                    data = df.to_dict(orient="list")
-                    doc.add_next_tick_callback(partial(save_source, name, data))
-                    if not i:
-                        doc.add_next_tick_callback(partial(switch_table_source,name, 0))
+        # def stream_df(doc, ctx, run_id, dfname):
+        #     try:
+        #         name = "{}_{}".format(dfname, run_id)
+        #         for i, df in enumerate(ctx.get_df_iter(run_id, dfname)):
+        #             df = df.dropna(how="any")
+        #             # df = df.fillna(-999)
+        #             data = df.to_dict(orient="list")
+        #             doc.add_next_tick_callback(partial(save_source, name, data))
+        #             if not i:
+        #                 doc.add_next_tick_callback(partial(switch_table_source,name, 0))
 
-            except Exception as e:
-                print(e)
-            finally:
-                doc.add_next_tick_callback(enable_button)
+            # except Exception as e:
+            #     print(e)
+            # finally:
+            #     doc.add_next_tick_callback(enable_button)
             
         def stream_array(doc, ctx, run_id, dfname):
             try:
