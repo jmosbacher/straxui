@@ -17,6 +17,18 @@ import json
 import numpy as np
 import time
 
+class TypeTester:
+   
+    def array(self,s):
+        return isinstance(s, (list, np.ndarray))
+
+    
+    def scalar(self,s):
+        if isinstance(s, str):
+            return False
+        return np.isscalar(s)
+
+
 class Page:
     """
     Base class for a page on the main app.
@@ -172,31 +184,23 @@ class LoadDataPage(Page):
             self.df_source.data = data
             self.current_position.value = 0
             
-
-        # def stream_df(doc, ctx, run_id, dfname):
-        #     try:
-        #         name = "{}_{}".format(dfname, run_id)
-        #         for i, df in enumerate(ctx.get_df_iter(run_id, dfname)):
-        #             df = df.dropna(how="any")
-        #             # df = df.fillna(-999)
-        #             data = df.to_dict(orient="list")
-        #             doc.add_next_tick_callback(partial(save_source, name, data))
-        #             if not i:
-        #                 doc.add_next_tick_callback(partial(switch_table_source,name, 0))
-
-            # except Exception as e:
-            #     print(e)
-            # finally:
-            #     doc.add_next_tick_callback(enable_button)
-            
         def stream_array(doc, ctx, run_id, dfname):
             try:
                 name = "{}_{}".format(dfname, run_id)
                 for i, arr in enumerate(ctx.get_array_iter(run_id, dfname)):
                     data = {n: arr[n].tolist() for n in arr.dtype.names}
+                    first_born = {k:v[0] for k,v in data.items()}
+                    # FIXME: there must be a better way
+                    for n, v in first_born.items():
+                        if not np.isscalar(v):
+                            data['mean({})'.format(n)] = np.mean(data[n], axis=1)
+                            data['std({})'.format(n)] = np.std(data[n], axis=1)
+                            data['index({})'.format(n)] =  [np.arange(len(x)) for x in data[n]]
+                    data["_index"] = np.arange(len(data[n]))
                     doc.add_next_tick_callback(partial(save_source, name, data))
                     if not i:
-                        doc.add_next_tick_callback(partial(switch_table_source,name, 0))
+                        doc.add_next_tick_callback(partial(reset_source, list(data)))
+                        doc.add_next_tick_callback(partial(switch_table_source, name, 0))
            
             except Exception as e:
                 print(e)
@@ -211,9 +215,9 @@ class LoadDataPage(Page):
             ctx = self.shared_state.get("strax_ctx")
             dfname = self.dataframe_selector.value
             run_id = self.run_id_selector.value
-            info = ctx.data_info(dfname)
+            # info = ctx.data_info(dfname)
             name = "{}_{}".format(dfname, run_id)
-            doc.add_next_tick_callback(partial(reset_source, list(info["Field name"])))
+            
             if name in self.shared_state['sources']:
                 doc.add_next_tick_callback(partial(switch_table_source, name))
             else:
@@ -250,26 +254,14 @@ class LoadDataPage(Page):
         pass
 
 class PlotColumnsPage(Page):
-    
-    plot_options = {
-        "tools":'wheel_zoom,save,pan,box_zoom,tap,box_select,lasso_select,reset',
-        'width': 600,
-        'height': 500,
-    }
-    selection_options = [
-       #(Title, name, catagories)
-        ("X Axis", "x", None),
-        ("Y Axis", "y", None),
-        ("Size", "size", list(np.arange(1, 10, 0.5))),
-        ("Color", "color", Plasma256),
-        ("Opacity", "alpha", list(np.arange(0, 1, 0.05)) ),
-    ]
     title = "Plot Columns"
-    sources = {}
 
     def init(self):
-        
-        self.plot_template_selector = Select(title="Plot Templat", value="", options=[])
+        self.templates = self.shared_state["plot_templates"]
+        self.column_selectors = []
+        # self.load_template(list(self.templates)[0])
+        self.plot_template_selector = Select(title="Plot Template", value="", options=list(self.templates))
+
         self.src_selector = Select(title="Source", value="", options=[])
         self.source = ColumnDataSource()
         self.current_position = Slider(start=0, end=2, value=0, step=1, title="Chunk", disabled=True, width=200)
@@ -278,80 +270,122 @@ class PlotColumnsPage(Page):
         self.next_button = Button(label="Next >>", button_type="primary", width=50, disabled = True)
         self.back_button = Button(label="<< Prev", button_type="primary", width=50, disabled = True)
         # self.run_id_selector = Select(title="Run ID", value="", options=[])
-        self.column_selectors = [Select(title=s[0], value="", options=[]) for s in self.selection_options]
+        self.column_selectors_group = column()
         self.plot_button = Button(label="Plot", button_type="primary", width=150)
-        
+        self.plot_layout = column()
         self.update()
     
-    def numeric_columns(self, name):
-        # FIXME: optimize, dont create a dataframe every time
-        srcs = self.shared_state["sources"][name]
-        if not srcs:
-            return []
-        data = srcs[0]
-        
-        return [k for k in data.keys() if np.isscalar(data[k][0])]
 
     def build_selection_bar(self):
+        def template_changed(attr, old, new):
+            if new in self.templates:
+                t = self.templates[new]
+            elif len(self.templates):
+                t = list(self.templates.values())[0]
+            else:
+                return
+            self.figure_kwargs = t["figure"]
+            self.column_selectors = []
+            for g in t["glyphs"]:
+                for title in g["selector_options"]:
+                    self.column_selectors.append( Select(title=title, value="", options=[]) )
+            self.column_selectors.append(self.plot_button)
+            self.template = t
+            self.column_selectors_group.children = self.column_selectors
+            self.src_selector.value = ""
+            self.src_selector.value = "__random__"
+        self.plot_template_selector.on_change("value", template_changed)
+        if len(self.templates):
+            self.plot_template_selector.value = list(self.templates)[0]
+
         def source_changed(attr, old, new):
             #FIXME implement caching of options and choices
             srcs = self.shared_state["sources"][new]
+            if not srcs:
+                return
+            src = srcs[0]
             self.current_position.end = len(srcs)
-            columns = self.numeric_columns(new)
+            # columns = self.numeric_columns(new)
             # print(columns)
-            for i, selector in enumerate(self.column_selectors):
-                selector.options = ["None"] + columns
-                if selector.value in columns:
-                    pass
-                elif self.selection_options[i][1] in columns:
-                    selector.value = self.selection_options[i][1]
-                else:
-                    selector.value = "None"
-                # FIXME: Make this error proof
+            tester = TypeTester()
+            sidx = 0
+            for g in self.template["glyphs"]:
+                for options in g["selector_options"].values():
+                    supports = options["supports"]
+                    kwarg = options["kwarg"]
+                    selector = self.column_selectors[sidx]
+                    sidx+=1
+                    test = getattr(tester, supports)
+                    columns = [col for col in src if test(src[col][0])]
+                    if kwarg in g["essential"]:
+                        selector.options = columns
+                    else:
+                        selector.options = ["None"] + columns
+
+                    if selector.value in columns:
+                        pass
+                    elif kwarg in columns:
+                        selector.value = kwarg
+                    else:
+                        selector.value = "None"
+                    # FIXME: Make this error proof
 
         self.src_selector.on_change("value", source_changed)
         self.src_selector.value = "__random__"
 
-        def refresh_plot():
-            self.plot_layout.children[0] = self.build_plot()
-        self.plot_button.on_click(refresh_plot)
+        self.plot_button.on_click(self.build_plot)
         data_loading = column(widgetbox(self.plot_template_selector, self.src_selector))
-        plot_options = column(*[widgetbox(s) for s in self.column_selectors])
-        return column(data_loading, plot_options, widgetbox(self.plot_button))
+        self.column_selectors_group.children = [widgetbox(s) for s in self.column_selectors]
+        return column(data_loading, self.column_selectors_group)
 
     def build_plot(self):
-        if self.plot_template_selector.value:
-            template_name = self.plot_template_selector.value
+        fig = figure(**self.figure_kwargs)
+        if self.src_selector.value in self.shared_state["sources"].keys():
+            self.current_name = self.src_selector.value
         else:
-            template_name = self.plot_template_selector.options[0]
-        template = self.shared_state["plot_templates"][template_name]
-
-        fig = figure(**template["figure"])
-        srcs = self.shared_state["sources"][self.src_selector.value]
+            self.current_name = "__random__"
+        srcs = self.shared_state["sources"][self.current_name]
+            
         idx = self.current_position.value
         if idx<len(srcs) and srcs:
             data = srcs[idx]
+            self.next_button.disabled = False
+            self.current_position.disabled = False
         else:
-            data = srcs["__random__"][0]
+            data = srcs[0]
         self.source.data = data
         df = self.source.to_df()
-        
-        options = dict(x="x", y="y", size=1, color="blue", alpha=0.5)
-        for (title, name, cats), selector in zip(self.selection_options, self.column_selectors):
-            if selector.value in df.columns:
-                if cats is None:
-                    pass
-                else:
-                    if len(set(df[selector.value])) > len(cats):
-                        groups = pd.qcut(df[selector.value].values, len(cats), duplicates='drop')
+        soptions = []
+        sidx = 0
+        for g in self.template["glyphs"]:
+            plot_func = getattr(fig, g["kind"])
+            kwargs = copy(g["kwargs"])
+            for options in g["selector_options"].values():
+                selector = self.column_selectors[sidx]
+                sidx+=1
+                kwarg = options["kwarg"]
+                cats = options["catagories"]
+                if selector.value in df.columns:
+                    if cats is None:
+                        kwargs[kwarg] = selector.value
                     else:
-                        groups = pd.Categorical(df[selector.value])
-                    vals = [cats[xx] for xx in groups.codes]
-                    self.source.data[name] = vals
-                options[name] = selector.value
-        fig.circle(**options, source=self.source)
+                        if len(set(df[selector.value])) > len(cats):
+                            groups = pd.qcut(df[selector.value].values, len(cats), duplicates='drop')
+                        else:
+                            groups = pd.Categorical(df[selector.value])
+                        vals = [cats[xx] for xx in groups.codes]
+                        self.source.data["__{}".format(kwarg)] = vals
+                        kwargs[kwarg] =  "__{}".format(kwarg)
+                elif kwarg in g["essential"]:
+                    return
 
-        
+            plot_func(**kwargs, source=self.source)
+        if len(self.plot_layout.children):
+            self.plot_layout.children[0] = fig
+        else:
+            self.plot_layout.children.append(fig)
+
+    def build_plot_pane(self):
         def switch_table_source(name, idx):
             try:
                 srcs = self.shared_state['sources'][name]
@@ -360,7 +394,7 @@ class PlotColumnsPage(Page):
                 self.current_position.end = len(srcs)
                 data = srcs[new]
                 self.current_position.value = new
-                self.df_source.data = data
+                self.source.stream(data, rollover=len(list(data.values())[0]))
                 if new:
                     self.back_button.disabled = False
                 else:
@@ -374,7 +408,7 @@ class PlotColumnsPage(Page):
                 #self.df_table.columns = [TableColumn(field=n, title=n) for n in data]
             except:
                 print("failed to get data")
-            
+      
         def next_pressed():
             switch_table_source(self.current_name, self.current_position.value+1)
         self.next_button.on_click(next_pressed)
@@ -382,20 +416,25 @@ class PlotColumnsPage(Page):
         def back_pressed():
             switch_table_source(self.current_name, self.current_position.value-1)
         self.back_button.on_click(back_pressed)
+
+        def position_changed(attr,old, new):
+            switch_table_source(self.current_name, new)
+        self.current_position.on_change("value", position_changed)
+
         buttons = row( widgetbox(self.back_button),
             widgetbox( self.current_position), widgetbox(self.next_button), )
-
-        return column(buttons, fig)
+        fig = figure(**self.figure_kwargs)
+        return column(fig, buttons)
 
     def create_page(self):
         selection_bar = self.build_selection_bar()
-        fig = self.build_plot()
-        self.plot_layout = column(fig)
+        
+        self.plot_layout = self.build_plot_pane()
         return row(selection_bar, self.plot_layout, width=self.width)
       
     def update(self):
-        self.src_selector.options = list(self.shared_state["sources"].keys())
-        self.plot_template_selector.options = [t for t in self.shared_state["plot_templates"]]
+        self.src_selector.options = [s for s in self.shared_state["sources"].keys()]
+        self.plot_template_selector.options = [t for t in self.shared_state["plot_templates"].keys()]
         # self.df_selector.value = self.shared_state["dataframe_names"][0]
 
 class StraxServerPage(Page):
@@ -456,7 +495,7 @@ class PlotTemplatesPage(Page):
         return column(selection ,widgetbox(self.json_viewer, width=self.width), width=self.width)
 
     def update(self):
-        self.template_selector.options = [t for t in self.shared_state["plot_templates"]]
+        self.template_selector.options = [t for t in self.shared_state["plot_templates"].keys()]
         
 
 page_classes = [ExplorePage, LoadDataPage, PlotColumnsPage, StraxServerPage, PlotTemplatesPage]

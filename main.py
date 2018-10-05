@@ -29,11 +29,12 @@ executor = ThreadPoolExecutor(max_workers=2)
 
 with open(join(dirname(__file__), "data","plot_templates.json"), "rb") as f:
     plot_templates = {t["name"]:t for t in json.load(f)}
-random_src = {"x":90*np.random.rand(100), "y": np.random.rand(100), 
+random_src = {"x":np.arange(100), "y": 90*np.random.rand(100), 
         "time":  10.*np.random.rand(100), "length":800.*np.random.rand(100),
-        "xs":[90*np.random.rand((10)) for _ in range(100)], "ys": [np.random.rand(10) for _ in range(100)]}
+        "xs":[np.arange(10) for _ in range(100)], "ys": [90*np.random.rand(10) for _ in range(100)]}
 sources = defaultdict(list)
-sources["__random__"].append(random_src)
+sources["__random__"] = [random_src]
+
 
 shared_state = {
     "executor": executor, 
@@ -57,5 +58,5 @@ def update_pages():
 # tabs = Tabs(tabs=[explore_panel,load_data_panel, plot_data_panel, rpc_server_details])
 panels = [Panel(child=page.create_page(), title=page.title) for page in pages]
 tabs = Tabs(tabs=panels)
-doc.add_periodic_callback(update_pages, 2000)
+doc.add_periodic_callback(update_pages, 3000)
 doc.add_root(tabs)
