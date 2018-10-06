@@ -81,7 +81,10 @@ class ExplorePage(Page):
     def build_pattern_search(self):
         def pattern_changed(attr, old, new):
             ctx = self.shared_state.get("strax_ctx")
-            matches = ctx.search_field(new)
+            try:
+                matches = ctx.search_field(new)
+            except:
+                matches = []
             if matches:
                 self.pattern_result_display.text = '\n'.join(matches)
             else:
@@ -96,10 +99,12 @@ class ExplorePage(Page):
     def build_data_info(self):
         def dataframe_changed(attr, old, new):
             self.df_title.text = 'Columns for {}:'.format(new)
-            ctx = self.shared_state.get("strax_ctx")
-            df = ctx.data_info(new)
-            self.df_source.data = df.astype("str").to_dict(orient='list')
-
+            try:
+                ctx = self.shared_state.get("strax_ctx")
+                df = ctx.data_info(new)
+                self.df_source.data = df.astype("str").to_dict(orient='list')
+            except:
+                pass
         self.dataframe_selector.on_change('value', dataframe_changed)
         self.dataframe_selector.value = self.dataframe_selector.options[0]
         return column(self.dataframe_selector, self.df_title, self.df_table)
@@ -251,7 +256,7 @@ class LoadDataPage(Page):
         return column(selection_bar, table, width=self.width)
 
     def update(self):
-        pass
+        self.dataframe_selector.options = self.shared_state.get('dataframe_names')
 
 class PlotColumnsPage(Page):
     title = "Plot Columns"
@@ -273,7 +278,7 @@ class PlotColumnsPage(Page):
         self.column_selectors_group = column()
         self.plot_button = Button(label="Plot", button_type="primary", width=150)
         self.plot_layout = column()
-        self.update()
+        # self.update()
     
 
     def build_selection_bar(self):
@@ -441,7 +446,8 @@ class StraxServerPage(Page):
     title = "Strax Settings"
 
     def init(self):
-        self.address_selector = TextInput(value="localhost:50051", title="Strax server:", width=200, height=60)
+        addr = self.shared_state["strax_ctx"].addr
+        self.address_selector = TextInput(value=addr, title="Strax server:", width=200, height=60)
         dataframe_names = self.shared_state.get('dataframe_names')
         self.strax_config_dataframe = Select(title="Load config for", value="", options=dataframe_names)
         strax_config_column_names = ['option', 'default', 'current', 'applies_to', 'help']
@@ -454,22 +460,26 @@ class StraxServerPage(Page):
             try:
                 ctx = self.shared_state.get('strax_ctx')
                 ctx.addr = self.address_selector.value
+                self.shared_state["update_pages"]()
             except:
                 self.address_selector.value = old
         self.address_selector.on_change('value', address_changed)
 
         def dataframe_changed(attr, old, new):
             ctx = self.shared_state.get('strax_ctx')
-            df = ctx.show_config(new)
-            data = df.to_dict(orient='list')
-            self.strax_config_table.columns = [TableColumn(field=name, title=name) for name in data]
-            self.strax_config_source.data = data
+            try:
+                df = ctx.show_config(new)
+                data = df.to_dict(orient='list')
+                self.strax_config_table.columns = [TableColumn(field=name, title=name) for name in data]
+                self.strax_config_source.data = data
+            except:
+                pass
         self.strax_config_dataframe.on_change('value', dataframe_changed)
         self.strax_config_dataframe.value = self.strax_config_dataframe.options[0]
         return column(widgetbox(self.address_selector), widgetbox(self.strax_config_dataframe), widgetbox(self.strax_config_table), width=self.width)
 
     def update(self):
-        pass
+        self.strax_config_dataframe.options = self.shared_state.get('dataframe_names')
 
 class PlotTemplatesPage(Page):
     title = 'Plot Templates'
@@ -484,6 +494,7 @@ class PlotTemplatesPage(Page):
         self.json_viewer.disabled = False
         
     def create_page(self):
+        
         def template_changed(attr, old, new):
             text = "Template values: \n"
             if new in self.plot_templates:

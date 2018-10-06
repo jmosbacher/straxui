@@ -1,5 +1,5 @@
 from os.path import dirname, join
-
+import os
 import pandas as pd
 from datetime import date
 from random import randint
@@ -18,7 +18,8 @@ import json
 import numpy as np
 from collections import defaultdict
 
-strax = StraxClient('localhost:50051')
+strax_addr = os.environ.get("STRAXRPC_ADDR", "localhost:50051")
+strax = StraxClient(strax_addr)
 try:
     dataframe_names = strax.search_dataframe_names("*")
 except:
@@ -52,11 +53,39 @@ for klass in page_classes:
     pages.append(page)
 
 def update_pages():
+    try:
+        dataframe_names = strax.search_dataframe_names("*")
+    except:
+        dataframe_names = ['event_basics']
+    shared_state["dataframe_names"] = dataframe_names
+
     for p in pages:
         p.update()
 
+shared_state["update_pages"] = update_pages
 # tabs = Tabs(tabs=[explore_panel,load_data_panel, plot_data_panel, rpc_server_details])
-panels = [Panel(child=page.create_page(), title=page.title) for page in pages]
+panels = []
+failed = []
+for page in pages:
+    try:
+       panels.append(Panel(child=page.create_page(), title=page.title) )
+    except:
+        failed.append(page)
+        print("failed to load {} page. ".format(page.title))
+update_pages()
 tabs = Tabs(tabs=panels)
+# def retry_failed(failed):
+#     refailed = []
+#     for page in failed:
+#         try:
+#             panel = Panel(child=page.create_page(), title=page.title)
+#             tabs.tabs.append(panel)
+#         except:
+#             refailed.append(page)
+#         if refailed:
+#             doc.add_timeout_callback(partial(retry_failed, refailed), 10000)
+
+# if failed:
+#     doc.add_timeout_callback(partial(retry_failed, failed), 10000)
 doc.add_periodic_callback(update_pages, 3000)
 doc.add_root(tabs)
